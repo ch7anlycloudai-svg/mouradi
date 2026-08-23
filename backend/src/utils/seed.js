@@ -5,7 +5,7 @@
  *   node src/utils/seed.js
  *
  * Required env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
+ *   SUPABASE_URL, SUPABASE_SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });

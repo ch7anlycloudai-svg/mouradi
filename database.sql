@@ -370,7 +370,7 @@ ALTER TABLE testimonials    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE store_settings  ENABLE ROW LEVEL SECURITY;
 
 -- Allow service_role full access (this is the default behavior, but explicit is better)
--- The backend ONLY uses SUPABASE_SERVICE_ROLE_KEY which bypasses RLS automatically.
+-- The backend ONLY uses SUPABASE_SECRET_KEY which bypasses RLS automatically.
 -- No additional policies are needed because service_role bypasses all RLS.
 
 -- --------------------------------------------------------------------------
@@ -402,7 +402,7 @@ ALTER TABLE store_settings  ENABLE ROW LEVEL SECURITY;
 -- MANUAL STEPS AFTER RUNNING THIS SQL:
 -- 1. Create a Storage bucket named "images" in Supabase Dashboard
 --    -> Storage -> New bucket -> Name: "images" -> Public bucket: ON
--- 2. Set your .env file with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
---    SUPABASE_ANON_KEY, and JWT_SECRET
+-- 2. Set your .env file with SUPABASE_URL, SUPABASE_SECRET_KEY,
+--    and JWT_SECRET
 -- 3. Change the default admin password via the admin dashboard
 -- --------------------------------------------------------------------------
