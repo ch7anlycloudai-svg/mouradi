@@ -3,14 +3,15 @@
   "version": "1.0.0",
   "description": "WWenatou Shopping - Premium Women's E-commerce Store",
   "scripts": {
-    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "postinstall": "cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "cd frontend && npm run build",
     "build:frontend": "cd frontend && npm run build",
     "start": "cd backend && npm start"
   },
-  "devDependencies": {
+  "dependencies": {
     "concurrently": "^9.0.1"
   }
 }
