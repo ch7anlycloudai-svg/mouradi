@@ -78,27 +78,30 @@ app.get('/api/health', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Production: serve React static files
+// Serve React frontend (static files + SPA fallback)
 // ---------------------------------------------------------------------------
-if (isProduction) {
-  const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+const fs = require('fs');
+const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+const indexHtml = path.join(frontendDist, 'index.html');
+
+if (fs.existsSync(indexHtml)) {
   app.use(express.static(frontendDist));
+
+  // 404 for unknown API routes (must come before SPA fallback)
+  app.use('/api/*', (req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
 
   // SPA fallback - serve index.html for all non-API routes
   app.get('*', (req, res) => {
-    if (req.path.startsWith('/api')) {
-      return res.status(404).json({ error: 'API endpoint not found.' });
-    }
-    res.sendFile(path.join(frontendDist, 'index.html'));
+    res.sendFile(indexHtml);
+  });
+} else {
+  // No frontend build available
+  app.use('/api/*', (req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
   });
 }
-
-// ---------------------------------------------------------------------------
-// 404 handler for API routes
-// ---------------------------------------------------------------------------
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ error: 'API endpoint not found.' });
-});
 
 // ---------------------------------------------------------------------------
 // Global error handler
