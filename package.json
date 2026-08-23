@@ -2,6 +2,7 @@
   "name": "wwenatou-shopping",
   "version": "1.0.0",
   "description": "WWenatou Shopping - Premium Women's E-commerce Store",
+  "main": "app.js",
   "scripts": {
     "postinstall": "cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
@@ -9,9 +10,10 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "cd frontend && npm run build",
     "build:frontend": "cd frontend && npm run build",
-    "start": "cd backend && npm start"
+    "start": "node app.js"
   },
   "dependencies": {
-    "concurrently": "^9.0.1"
+    "concurrently": "^9.0.1",
+    "dotenv": "^16.4.5"
   }
 }

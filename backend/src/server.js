@@ -1,4 +1,7 @@
-require('dotenv').config();
+// Load .env if not already loaded (direct run via backend/npm start)
+if (!process.env.SUPABASE_URL) {
+  require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+}
 
 const express = require('express');
 const cors = require('cors');
@@ -20,7 +23,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: isProduction ? undefined : false,
+    contentSecurityPolicy: false,
   })
 );
 
