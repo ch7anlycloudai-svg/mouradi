@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf frontend)",
+      "Bash(npx create-vite@latest frontend --template react-ts)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(grep -v \"-- \")",
+      "Bash(find ./frontend/src ./backend/src -type f \\\\\\(-name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx -o -name *.json -o -name *.sql \\\\\\))"
+    ]
+  }
+}

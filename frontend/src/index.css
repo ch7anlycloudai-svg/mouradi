@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: 'Tajawal', 'Inter', sans-serif;
+    color: #0A0A0A;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  [dir="rtl"] body {
+    font-family: 'Tajawal', sans-serif;
+  }
+
+  [dir="ltr"] body {
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  [dir="rtl"] h1, [dir="rtl"] h2, [dir="rtl"] h3 {
+    letter-spacing: 0;
+  }
+
+  img {
+    max-width: 100%;
+    display: block;
+  }
+
+  ::selection {
+    background-color: #FE8B7C;
+    color: white;
+  }
+}
+
+@layer components {
+  /* Primary solid button — fashion-store style */
+  .btn-primary {
+    @apply inline-flex items-center justify-center bg-primary text-white text-sm font-medium tracking-wide
+           px-7 py-3.5 transition-all duration-200 hover:bg-primary-hover active:scale-[0.98];
+  }
+
+  /* Outline button */
+  .btn-outline {
+    @apply inline-flex items-center justify-center border border-brand-text text-brand-text text-sm font-medium tracking-wide
+           px-7 py-3.5 transition-all duration-200 hover:bg-brand-text hover:text-white active:scale-[0.98];
+  }
+
+  /* Secondary quiet button */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center bg-gray-100 text-brand-text text-sm font-medium tracking-wide
+           px-7 py-3.5 transition-all duration-200 hover:bg-gray-200 active:scale-[0.98];
+  }
+
+  .container-main {
+    @apply max-w-[1320px] mx-auto px-5 sm:px-8 lg:px-10;
+  }
+
+  .input-field {
+    @apply w-full border border-brand-border bg-white px-4 py-3 text-sm placeholder:text-brand-text-muted
+           focus:outline-none focus:border-brand-text transition-colors duration-200;
+  }
+
+  .section-title {
+    @apply text-xl md:text-2xl font-bold text-brand-text tracking-tight;
+  }
+
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-widest-plus text-brand-text-secondary;
+  }
+
+  .link-underline {
+    @apply relative after:absolute after:bottom-0 after:start-0 after:h-px after:w-0 after:bg-current
+           after:transition-all after:duration-300 hover:after:w-full;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+/* Image shimmer loading */
+.img-loading {
+  background: linear-gradient(110deg, #f0f0f0 8%, #fafafa 18%, #f0f0f0 33%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Smooth focus ring */
+*:focus-visible {
+  outline: 2px solid #FE8B7C;
+  outline-offset: 2px;
+}
