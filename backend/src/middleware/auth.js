@@ -1,7 +1,13 @@
 const jwt = require('jsonwebtoken');
 const supabase = require('../config/supabase');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'wwenatou-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
+if (!JWT_SECRET) {
+  console.error('Missing JWT_SECRET environment variable');
+  process.exit(1);
+}
 
 /**
  * Verify JWT token from Authorization header.
@@ -68,7 +74,7 @@ const generateToken = (user) => {
   return jwt.sign(
     { id: user.id, email: user.email },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: JWT_EXPIRES_IN }
   );
 };
 
