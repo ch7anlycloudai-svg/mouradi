@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const supabase = require('../config/supabase');
+const { query } = require('../config/database');
 const { generateToken, authenticate } = require('../middleware/auth');
 
 // ---------------------------------------------------------------------------
@@ -16,13 +16,13 @@ router.post('/login', async (req, res) => {
     }
 
     // Find admin by email
-    const { data: admin, error } = await supabase
-      .from('admin_users')
-      .select('*')
-      .eq('email', email.toLowerCase().trim())
-      .single();
+    const result = await query(
+      'SELECT * FROM admin_users WHERE email = $1',
+      [email.toLowerCase().trim()]
+    );
 
-    if (error || !admin) {
+    const admin = result.rows[0];
+    if (!admin) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
@@ -54,19 +54,18 @@ router.post('/login', async (req, res) => {
 router.get('/verify', authenticate, async (req, res) => {
   try {
     // Token is already verified by middleware; confirm user still exists
-    const { data: admin, error } = await supabase
-      .from('admin_users')
-      .select('id, email')
-      .eq('id', req.user.id)
-      .single();
+    const result = await query(
+      'SELECT id, email FROM admin_users WHERE id = $1',
+      [req.user.id]
+    );
 
-    if (error || !admin) {
+    if (result.rows.length === 0) {
       return res.status(401).json({ error: 'User no longer exists.' });
     }
 
     return res.json({
       valid: true,
-      user: admin,
+      user: result.rows[0],
     });
   } catch (err) {
     console.error('Token verify error:', err);

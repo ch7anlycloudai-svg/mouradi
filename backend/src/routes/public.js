@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const supabase = require('../config/supabase');
+const { query, getClient } = require('../config/database');
 
 // ---------------------------------------------------------------------------
 // GET /api/products - List products with filters, pagination, sorting
@@ -21,66 +21,114 @@ router.get('/products', async (req, res) => {
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
-    const from = (pageNum - 1) * limitNum;
-    const to = from + limitNum - 1;
+    const offset = (pageNum - 1) * limitNum;
 
-    let query = supabase
-      .from('products')
-      .select(
-        '*, product_images(*), product_colors(*), product_sizes(*), category:categories(id, name_ar, name_fr)',
-        { count: 'exact' }
-      )
-      .eq('is_available', true);
+    // Build WHERE clauses
+    const conditions = ['p.is_available = true'];
+    const params = [];
+    let paramIdx = 1;
 
-    // Filter by category
     if (category) {
-      query = query.eq('category_id', category);
+      conditions.push(`p.category_id = $${paramIdx++}`);
+      params.push(category);
     }
-
     if (minPrice) {
-      query = query.gte('price', parseFloat(minPrice));
+      conditions.push(`p.price >= $${paramIdx++}`);
+      params.push(parseFloat(minPrice));
     }
     if (maxPrice) {
-      query = query.lte('price', parseFloat(maxPrice));
+      conditions.push(`p.price <= $${paramIdx++}`);
+      params.push(parseFloat(maxPrice));
     }
-
     if (search) {
-      query = query.or(`name_ar.ilike.%${search}%,name_fr.ilike.%${search}%`);
+      conditions.push(`(p.name_ar ILIKE $${paramIdx} OR p.name_fr ILIKE $${paramIdx})`);
+      params.push(`%${search}%`);
+      paramIdx++;
     }
 
     // Sorting
+    let orderBy = 'p.created_at DESC';
     switch (sort) {
       case 'price_asc':
-        query = query.order('price', { ascending: true });
+        orderBy = 'p.price ASC';
         break;
       case 'price_desc':
-        query = query.order('price', { ascending: false });
+        orderBy = 'p.price DESC';
         break;
       case 'featured':
-        query = query.eq('is_featured', true).order('created_at', { ascending: false });
-        break;
-      case 'newest':
-      default:
-        query = query.order('created_at', { ascending: false });
+        conditions.push('p.is_featured = true');
+        orderBy = 'p.created_at DESC';
         break;
     }
 
-    query = query.range(from, to);
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const { data: products, error, count } = await query;
+    // Count total
+    const countResult = await query(
+      `SELECT COUNT(*) FROM products p ${whereClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
 
-    if (error) throw error;
+    // Fetch products
+    const productsResult = await query(
+      `SELECT p.*,
+              json_build_object('id', c.id, 'name_ar', c.name_ar, 'name_fr', c.name_fr) AS category
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.id
+       ${whereClause}
+       ORDER BY ${orderBy}
+       LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      [...params, limitNum, offset]
+    );
+
+    // Fetch related data for all products
+    const products = productsResult.rows;
+    if (products.length > 0) {
+      const productIds = products.map((p) => p.id);
+
+      const [imagesResult, colorsResult, sizesResult] = await Promise.all([
+        query('SELECT * FROM product_images WHERE product_id = ANY($1) ORDER BY sort_order', [productIds]),
+        query('SELECT * FROM product_colors WHERE product_id = ANY($1)', [productIds]),
+        query('SELECT * FROM product_sizes WHERE product_id = ANY($1)', [productIds]),
+      ]);
+
+      const imagesMap = {};
+      const colorsMap = {};
+      const sizesMap = {};
+
+      for (const img of imagesResult.rows) {
+        if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+        imagesMap[img.product_id].push(img);
+      }
+      for (const clr of colorsResult.rows) {
+        if (!colorsMap[clr.product_id]) colorsMap[clr.product_id] = [];
+        colorsMap[clr.product_id].push(clr);
+      }
+      for (const sz of sizesResult.rows) {
+        if (!sizesMap[sz.product_id]) sizesMap[sz.product_id] = [];
+        sizesMap[sz.product_id].push(sz);
+      }
+
+      for (const p of products) {
+        p.images = imagesMap[p.id] || [];
+        p.colors = colorsMap[p.id] || [];
+        p.sizes = sizesMap[p.id] || [];
+        // Normalize category null
+        if (!p.category || !p.category.id) p.category = null;
+      }
+    }
 
     // Post-filter by size / color (related tables)
-    let filtered = products || [];
+    let filtered = products;
     if (size) {
       filtered = filtered.filter((p) =>
-        p.product_sizes?.some((s) => s.size.toLowerCase() === size.toLowerCase())
+        p.sizes?.some((s) => s.size.toLowerCase() === size.toLowerCase())
       );
     }
     if (color) {
       filtered = filtered.filter((p) =>
-        p.product_colors?.some((c) =>
+        p.colors?.some((c) =>
           c.name_ar.toLowerCase().includes(color.toLowerCase()) ||
           c.name_fr.toLowerCase().includes(color.toLowerCase()) ||
           c.hex_code.toLowerCase() === color.toLowerCase()
@@ -88,7 +136,6 @@ router.get('/products', async (req, res) => {
       );
     }
 
-    const total = count || 0;
     const totalPages = Math.ceil(total / limitNum);
 
     return res.json({
@@ -111,31 +158,31 @@ router.get('/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: product, error } = await supabase
-      .from('products')
-      .select(
-        '*, product_images(*), product_colors(*), product_sizes(*), category:categories(id, name_ar, name_fr)'
-      )
-      .eq('id', id)
-      .single();
+    const productResult = await query(
+      `SELECT p.*,
+              json_build_object('id', c.id, 'name_ar', c.name_ar, 'name_fr', c.name_fr) AS category
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.id
+       WHERE p.id = $1`,
+      [id]
+    );
 
-    if (error || !product) {
+    if (productResult.rows.length === 0) {
       return res.status(404).json({ error: 'Product not found.' });
     }
 
-    // Sort images by sort_order
-    if (product.product_images) {
-      product.images = product.product_images.sort((a, b) => a.sort_order - b.sort_order);
-      delete product.product_images;
-    }
-    if (product.product_colors) {
-      product.colors = product.product_colors;
-      delete product.product_colors;
-    }
-    if (product.product_sizes) {
-      product.sizes = product.product_sizes;
-      delete product.product_sizes;
-    }
+    const product = productResult.rows[0];
+
+    const [imagesResult, colorsResult, sizesResult] = await Promise.all([
+      query('SELECT * FROM product_images WHERE product_id = $1 ORDER BY sort_order', [id]),
+      query('SELECT * FROM product_colors WHERE product_id = $1', [id]),
+      query('SELECT * FROM product_sizes WHERE product_id = $1', [id]),
+    ]);
+
+    product.images = imagesResult.rows;
+    product.colors = colorsResult.rows;
+    product.sizes = sizesResult.rows;
+    if (!product.category || !product.category.id) product.category = null;
 
     return res.json(product);
   } catch (err) {
@@ -149,14 +196,8 @@ router.get('/products/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/categories', async (req, res) => {
   try {
-    const { data: categories, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('sort_order', { ascending: true });
-
-    if (error) throw error;
-
-    return res.json(categories || []);
+    const result = await query('SELECT * FROM categories ORDER BY sort_order ASC');
+    return res.json(result.rows);
   } catch (err) {
     console.error('Error fetching categories:', err);
     return res.status(500).json({ error: 'Failed to fetch categories.' });
@@ -171,75 +212,83 @@ router.get('/homepage', async (req, res) => {
     const [
       heroBannersRes,
       promoBannersRes,
-      featuredRes,
-      newArrivalsRes,
-      saleRes,
-      testimonialsRes,
       categoriesRes,
+      testimonialsRes,
     ] = await Promise.all([
-      supabase
-        .from('hero_banners')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('promo_banners')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('products')
-        .select('*, product_images(*), product_colors(*), product_sizes(*), category:categories(id, name_ar, name_fr)')
-        .eq('is_available', true)
-        .eq('is_featured', true)
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabase
-        .from('products')
-        .select('*, product_images(*), product_colors(*), product_sizes(*), category:categories(id, name_ar, name_fr)')
-        .eq('is_available', true)
-        .eq('is_new_arrival', true)
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabase
-        .from('products')
-        .select('*, product_images(*), product_colors(*), product_sizes(*), category:categories(id, name_ar, name_fr)')
-        .eq('is_available', true)
-        .eq('is_on_sale', true)
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabase
-        .from('testimonials')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('categories')
-        .select('*')
-        .order('sort_order', { ascending: true }),
+      query("SELECT * FROM hero_banners WHERE is_active = true ORDER BY sort_order ASC"),
+      query("SELECT * FROM promo_banners WHERE is_active = true ORDER BY sort_order ASC"),
+      query("SELECT * FROM categories ORDER BY sort_order ASC"),
+      query("SELECT * FROM testimonials WHERE is_active = true ORDER BY sort_order ASC"),
     ]);
 
-    // Normalize product data
-    const normalizeProducts = (products) => {
-      return (products || []).map(p => ({
+    // Fetch featured, new arrivals, sale products
+    const [featuredRes, newArrivalsRes, saleRes] = await Promise.all([
+      query(
+        `SELECT p.*, json_build_object('id', c.id, 'name_ar', c.name_ar, 'name_fr', c.name_fr) AS category
+         FROM products p LEFT JOIN categories c ON p.category_id = c.id
+         WHERE p.is_available = true AND p.is_featured = true
+         ORDER BY p.created_at DESC LIMIT 8`
+      ),
+      query(
+        `SELECT p.*, json_build_object('id', c.id, 'name_ar', c.name_ar, 'name_fr', c.name_fr) AS category
+         FROM products p LEFT JOIN categories c ON p.category_id = c.id
+         WHERE p.is_available = true AND p.is_new_arrival = true
+         ORDER BY p.created_at DESC LIMIT 8`
+      ),
+      query(
+        `SELECT p.*, json_build_object('id', c.id, 'name_ar', c.name_ar, 'name_fr', c.name_fr) AS category
+         FROM products p LEFT JOIN categories c ON p.category_id = c.id
+         WHERE p.is_available = true AND p.is_on_sale = true
+         ORDER BY p.created_at DESC LIMIT 8`
+      ),
+    ]);
+
+    // Gather all product IDs to fetch images/colors/sizes in bulk
+    const allProducts = [...featuredRes.rows, ...newArrivalsRes.rows, ...saleRes.rows];
+    const allProductIds = [...new Set(allProducts.map((p) => p.id))];
+
+    let imagesMap = {};
+    let colorsMap = {};
+    let sizesMap = {};
+
+    if (allProductIds.length > 0) {
+      const [imagesResult, colorsResult, sizesResult] = await Promise.all([
+        query('SELECT * FROM product_images WHERE product_id = ANY($1) ORDER BY sort_order', [allProductIds]),
+        query('SELECT * FROM product_colors WHERE product_id = ANY($1)', [allProductIds]),
+        query('SELECT * FROM product_sizes WHERE product_id = ANY($1)', [allProductIds]),
+      ]);
+
+      for (const img of imagesResult.rows) {
+        if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+        imagesMap[img.product_id].push(img);
+      }
+      for (const clr of colorsResult.rows) {
+        if (!colorsMap[clr.product_id]) colorsMap[clr.product_id] = [];
+        colorsMap[clr.product_id].push(clr);
+      }
+      for (const sz of sizesResult.rows) {
+        if (!sizesMap[sz.product_id]) sizesMap[sz.product_id] = [];
+        sizesMap[sz.product_id].push(sz);
+      }
+    }
+
+    const normalizeProducts = (rows) =>
+      rows.map((p) => ({
         ...p,
-        images: (p.product_images || []).sort((a, b) => a.sort_order - b.sort_order),
-        colors: p.product_colors || [],
-        sizes: p.product_sizes || [],
-        product_images: undefined,
-        product_colors: undefined,
-        product_sizes: undefined,
+        images: imagesMap[p.id] || [],
+        colors: colorsMap[p.id] || [],
+        sizes: sizesMap[p.id] || [],
+        category: p.category && p.category.id ? p.category : null,
       }));
-    };
 
     return res.json({
-      heroBanners: heroBannersRes.data || [],
-      promoBanners: promoBannersRes.data || [],
-      featuredProducts: normalizeProducts(featuredRes.data),
-      newArrivals: normalizeProducts(newArrivalsRes.data),
-      saleProducts: normalizeProducts(saleRes.data),
-      testimonials: testimonialsRes.data || [],
-      categories: categoriesRes.data || [],
+      heroBanners: heroBannersRes.rows,
+      promoBanners: promoBannersRes.rows,
+      featuredProducts: normalizeProducts(featuredRes.rows),
+      newArrivals: normalizeProducts(newArrivalsRes.rows),
+      saleProducts: normalizeProducts(saleRes.rows),
+      testimonials: testimonialsRes.rows,
+      categories: categoriesRes.rows,
     });
   } catch (err) {
     console.error('Error fetching homepage data:', err);
@@ -252,15 +301,11 @@ router.get('/homepage', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/settings', async (req, res) => {
   try {
-    const { data: settings, error } = await supabase
-      .from('store_settings')
-      .select('*')
-      .limit(1)
-      .single();
-
-    if (error) throw error;
-
-    return res.json(settings);
+    const result = await query('SELECT * FROM store_settings LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Settings not found.' });
+    }
+    return res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching settings:', err);
     return res.status(500).json({ error: 'Failed to fetch settings.' });
@@ -271,6 +316,7 @@ router.get('/settings', async (req, res) => {
 // POST /api/orders - Create order (guest checkout)
 // ---------------------------------------------------------------------------
 router.post('/orders', async (req, res) => {
+  const client = await getClient();
   try {
     const {
       customer_name,
@@ -290,43 +336,38 @@ router.post('/orders', async (req, res) => {
       return res.status(400).json({ error: 'Order must contain at least one item.' });
     }
 
+    await client.query('BEGIN');
+
     // 1. Find or create customer by phone
-    let { data: customer } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('phone', customer_phone)
-      .single();
+    let customerResult = await client.query(
+      'SELECT * FROM customers WHERE phone = $1',
+      [customer_phone]
+    );
+    let customer = customerResult.rows[0];
 
     if (!customer) {
-      const { data: newCustomer, error: custErr } = await supabase
-        .from('customers')
-        .insert({
-          name: customer_name,
-          phone: customer_phone,
-          province: customer_province,
-          address: customer_address,
-        })
-        .select()
-        .single();
-
-      if (custErr) throw custErr;
-      customer = newCustomer;
+      const insertResult = await client.query(
+        'INSERT INTO customers (name, phone, province, address) VALUES ($1, $2, $3, $4) RETURNING *',
+        [customer_name, customer_phone, customer_province, customer_address]
+      );
+      customer = insertResult.rows[0];
     }
 
     // 2. Fetch product details for price validation
     const productIds = items.map((i) => i.product_id);
-    const { data: products, error: prodErr } = await supabase
-      .from('products')
-      .select('id, name_ar, name_fr, price')
-      .in('id', productIds);
-
-    if (prodErr) throw prodErr;
+    const productsResult = await client.query(
+      'SELECT id, name_ar, name_fr, price FROM products WHERE id = ANY($1)',
+      [productIds]
+    );
 
     const productMap = {};
-    (products || []).forEach((p) => { productMap[p.id] = p; });
+    for (const p of productsResult.rows) {
+      productMap[p.id] = p;
+    }
 
     for (const item of items) {
       if (!productMap[item.product_id]) {
+        await client.query('ROLLBACK');
         return res.status(400).json({ error: `Product ${item.product_id} not found.` });
       }
     }
@@ -358,12 +399,11 @@ router.post('/orders', async (req, res) => {
     let discountAmount = 0;
 
     if (coupon_code) {
-      const { data: coupon } = await supabase
-        .from('coupons')
-        .select('*')
-        .eq('code', coupon_code.toUpperCase())
-        .eq('is_active', true)
-        .single();
+      const couponResult = await client.query(
+        "SELECT * FROM coupons WHERE code = $1 AND is_active = true",
+        [coupon_code.toUpperCase()]
+      );
+      const coupon = couponResult.rows[0];
 
       if (coupon) {
         const now = new Date();
@@ -381,10 +421,10 @@ router.post('/orders', async (req, res) => {
           discountAmount = Math.round(discountAmount * 100) / 100;
 
           // Increment used_count
-          await supabase
-            .from('coupons')
-            .update({ used_count: coupon.used_count + 1 })
-            .eq('id', coupon.id);
+          await client.query(
+            'UPDATE coupons SET used_count = used_count + 1 WHERE id = $1',
+            [coupon.id]
+          );
         }
       }
     }
@@ -393,55 +433,38 @@ router.post('/orders', async (req, res) => {
 
     // 5. Generate order number WW-YYYY-NNNN
     const year = new Date().getFullYear();
-    const { data: lastOrder } = await supabase
-      .from('orders')
-      .select('order_number')
-      .like('order_number', `WW-${year}-%`)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    const lastOrderResult = await client.query(
+      "SELECT order_number FROM orders WHERE order_number LIKE $1 ORDER BY created_at DESC LIMIT 1",
+      [`WW-${year}-%`]
+    );
 
     let nextNum = 1;
-    if (lastOrder && lastOrder.order_number) {
-      const parts = lastOrder.order_number.split('-');
+    if (lastOrderResult.rows.length > 0) {
+      const parts = lastOrderResult.rows[0].order_number.split('-');
       const lastNum = parseInt(parts[2], 10);
       if (!isNaN(lastNum)) nextNum = lastNum + 1;
     }
     const orderNumber = `WW-${year}-${String(nextNum).padStart(4, '0')}`;
 
     // 6. Insert order
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .insert({
-        order_number: orderNumber,
-        customer_id: customer.id,
-        customer_name,
-        customer_phone,
-        customer_province,
-        customer_address,
-        customer_notes: customer_notes || null,
-        subtotal,
-        discount_amount: discountAmount,
-        total,
-        coupon_code: coupon_code ? coupon_code.toUpperCase() : null,
-        status: 'pending',
-      })
-      .select()
-      .single();
-
-    if (orderErr) throw orderErr;
+    const orderResult = await client.query(
+      `INSERT INTO orders (order_number, customer_id, customer_name, customer_phone, customer_province, customer_address, customer_notes, subtotal, discount_amount, total, coupon_code, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+       RETURNING *`,
+      [orderNumber, customer.id, customer_name, customer_phone, customer_province, customer_address, customer_notes || null, subtotal, discountAmount, total, coupon_code ? coupon_code.toUpperCase() : null]
+    );
+    const order = orderResult.rows[0];
 
     // 7. Insert order items
-    const itemsToInsert = orderItems.map((item) => ({
-      ...item,
-      order_id: order.id,
-    }));
+    for (const item of orderItems) {
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, product_name_ar, product_name_fr, product_image, price, quantity, color_name_ar, color_name_fr, color_hex, size)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [order.id, item.product_id, item.product_name_ar, item.product_name_fr, item.product_image, item.price, item.quantity, item.color_name_ar, item.color_name_fr, item.color_hex, item.size]
+      );
+    }
 
-    const { error: itemsErr } = await supabase
-      .from('order_items')
-      .insert(itemsToInsert);
-
-    if (itemsErr) throw itemsErr;
+    await client.query('COMMIT');
 
     return res.status(201).json({
       message: 'Order placed successfully.',
@@ -453,8 +476,11 @@ router.post('/orders', async (req, res) => {
       },
     });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error creating order:', err);
     return res.status(500).json({ error: 'Failed to create order.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -469,14 +495,13 @@ router.post('/coupons/validate', async (req, res) => {
       return res.status(400).json({ error: 'Coupon code is required.' });
     }
 
-    const { data: coupon, error } = await supabase
-      .from('coupons')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .eq('is_active', true)
-      .single();
+    const result = await query(
+      "SELECT * FROM coupons WHERE code = $1 AND is_active = true",
+      [code.toUpperCase()]
+    );
 
-    if (error || !coupon) {
+    const coupon = result.rows[0];
+    if (!coupon) {
       return res.status(404).json({ error: 'Coupon not found or inactive.' });
     }
 

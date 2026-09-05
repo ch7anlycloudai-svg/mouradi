@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const supabase = require('../config/supabase');
+const { query } = require('../config/database');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -47,17 +47,16 @@ const isAdmin = async (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
 
     // Verify admin exists in database
-    const { data: admin, error } = await supabase
-      .from('admin_users')
-      .select('id, email')
-      .eq('id', decoded.id)
-      .single();
+    const result = await query(
+      'SELECT id, email FROM admin_users WHERE id = $1',
+      [decoded.id]
+    );
 
-    if (error || !admin) {
+    if (result.rows.length === 0) {
       return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
     }
 
-    req.user = { ...decoded, ...admin };
+    req.user = { ...decoded, ...result.rows[0] };
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {

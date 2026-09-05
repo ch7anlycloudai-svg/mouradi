@@ -1,22 +1,15 @@
 -- --------------------------------------------------------------------------
 -- WWenatou Shopping - Complete Database Schema
--- Supabase PostgreSQL
+-- PostgreSQL 13+
 --
--- Run this entire script in the Supabase SQL Editor to create all
--- required tables, relationships, indexes, functions, triggers, and
--- initial seed data.
+-- Run this script in your PostgreSQL database to create all required
+-- tables, relationships, indexes, functions, triggers, and seed data.
 --
 -- Tables: 14
 -- Indexes: 20
 -- Triggers: 2
 -- Functions: 1
 -- Seed rows: 2 (admin user + store settings)
--- Stock quantity fields: 0 (by design)
---
--- This script is safe to run on a fresh Supabase project.
---
--- IMPORTANT: After running this SQL, you must also create a Supabase
--- Storage bucket named "images" with public access enabled.
 -- --------------------------------------------------------------------------
 
 
@@ -337,7 +330,7 @@ CREATE TRIGGER trg_orders_updated_at
 -- The hash below is bcrypt(admin123, 10 rounds)
 INSERT INTO admin_users (email, password_hash)
 SELECT 'admin@wwenatou.com',
-       '$2b$10$EIXe0RZ8GpFmVEBVo3R5zuYxPCfGZmpiJOqRSuNYMOXMQFh6pOKXy'
+       '$2a$10$b6BoJ8rvJES9cv09bJNX0e8i8xRhuMjaFxvJjkHesUAeEa/86BxOK'
 WHERE NOT EXISTS (SELECT 1 FROM admin_users WHERE email = 'admin@wwenatou.com');
 
 -- Default store settings
@@ -348,61 +341,13 @@ WHERE NOT EXISTS (SELECT 1 FROM store_settings LIMIT 1);
 
 
 -- --------------------------------------------------------------------------
--- 18. SUPABASE ROW LEVEL SECURITY (RLS)
--- --------------------------------------------------------------------------
--- Disable RLS on all tables so the service_role key can access everything.
--- The backend uses the service_role key for all operations.
--- Public access is controlled by the Express API layer, not by Supabase RLS.
-
-ALTER TABLE admin_users     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categories      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE product_images  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE product_colors  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE product_sizes   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customers       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE coupons         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hero_banners    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_banners   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE testimonials    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE store_settings  ENABLE ROW LEVEL SECURITY;
-
--- Allow service_role full access (this is the default behavior, but explicit is better)
--- The backend ONLY uses SUPABASE_SECRET_KEY which bypasses RLS automatically.
--- No additional policies are needed because service_role bypasses all RLS.
-
--- --------------------------------------------------------------------------
 -- DONE
 -- --------------------------------------------------------------------------
--- 14 tables created:
---   1. admin_users        - Admin authentication
---   2. categories         - Product categories
---   3. products           - Product catalog
---   4. product_images     - Multiple images per product
---   5. product_colors     - Color variants per product
---   6. product_sizes      - Size variants per product
---   7. customers          - Guest checkout customers (by phone)
---   8. orders             - Order records
---   9. order_items        - Line items per order
---  10. coupons            - Discount coupons
---  11. hero_banners       - Homepage hero banners
---  12. promo_banners      - Homepage promo banners
---  13. testimonials       - Customer testimonials
---  14. store_settings     - Global store configuration
+-- 14 tables, 20 indexes, 2 enum types, 2 triggers, 1 function, 2 seed rows
 --
--- 20 indexes created
--- 2 custom enum types (order_status, discount_type)
--- 2 triggers (auto-update updated_at on products & orders)
--- 1 function (update_updated_at_column)
--- 2 seed rows (admin user + store settings)
--- 0 stock_quantity fields (by design - no inventory tracking)
---
--- MANUAL STEPS AFTER RUNNING THIS SQL:
--- 1. Create a Storage bucket named "images" in Supabase Dashboard
---    -> Storage -> New bucket -> Name: "images" -> Public bucket: ON
--- 2. Set your .env file with SUPABASE_URL, SUPABASE_SECRET_KEY,
---    and JWT_SECRET
--- 3. Change the default admin password via the admin dashboard
+-- DEPLOYMENT STEPS:
+-- 1. Create a PostgreSQL database in cPanel
+-- 2. Run this SQL script against the database
+-- 3. Set environment variables (DATABASE_URL or PG* vars)
+-- 4. Run: npm install && npm run build && npm start
 -- --------------------------------------------------------------------------

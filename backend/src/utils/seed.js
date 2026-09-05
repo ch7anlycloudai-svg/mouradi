@@ -1,61 +1,62 @@
 /**
- * Seed script: creates default store settings if not present.
+ * Seed script: creates default admin user and store settings if not present.
  *
- * The admin user is created by database.sql (run in Supabase SQL Editor).
  * Default admin: admin@wwenatou.com / admin123
  *
  * Usage:
  *   node src/utils/seed.js
  *
  * Required env vars:
- *   SUPABASE_URL, SUPABASE_SECRET_KEY
+ *   DATABASE_URL or PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
 
-const supabase = require('../config/supabase');
+const bcrypt = require('bcryptjs');
+const { query, shutdown } = require('../config/database');
 
 async function seed() {
   console.log('--- WWenatou Seed Script ---\n');
 
-  // Insert default store settings (if not exists)
-  console.log('Checking for existing store settings...');
+  // 1. Create default admin user if not exists
+  console.log('Checking for existing admin user...');
+  const adminResult = await query(
+    "SELECT id FROM admin_users WHERE email = 'admin@wwenatou.com'"
+  );
 
-  const { data: existingSettings } = await supabase
-    .from('store_settings')
-    .select('id')
-    .limit(1)
-    .single();
-
-  if (existingSettings) {
-    console.log(`Store settings already exist (id: ${existingSettings.id}). Skipping.\n`);
+  if (adminResult.rows.length > 0) {
+    console.log(`Admin user already exists (id: ${adminResult.rows[0].id}). Skipping.\n`);
   } else {
-    const { data: settings, error: settingsErr } = await supabase
-      .from('store_settings')
-      .insert({
-        store_name: 'WWenatou Shopping',
-        whatsapp_number: '+22247305955',
-        phone_number: '+22247305955',
-        email: 'contact@wwenatou.com',
-        address_ar: 'نواكشوط، موريتانيا',
-        address_fr: 'Nouakchott, Mauritanie',
-      })
-      .select('id')
-      .single();
+    const passwordHash = await bcrypt.hash('admin123', 10);
+    const insertResult = await query(
+      'INSERT INTO admin_users (email, password_hash) VALUES ($1, $2) RETURNING id',
+      ['admin@wwenatou.com', passwordHash]
+    );
+    console.log(`Default admin user created (id: ${insertResult.rows[0].id})\n`);
+  }
 
-    if (settingsErr) {
-      console.error('Failed to create store settings:', settingsErr.message);
-      process.exit(1);
-    }
+  // 2. Create default store settings if not exists
+  console.log('Checking for existing store settings...');
+  const settingsResult = await query('SELECT id FROM store_settings LIMIT 1');
 
-    console.log(`Default store settings created (id: ${settings.id})\n`);
+  if (settingsResult.rows.length > 0) {
+    console.log(`Store settings already exist (id: ${settingsResult.rows[0].id}). Skipping.\n`);
+  } else {
+    const insertResult = await query(
+      `INSERT INTO store_settings (store_name, whatsapp_number, phone_number, email, address_ar, address_fr)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      ['WWenatou Shopping', '+22247305955', '+22247305955', 'contact@wwenatou.com', 'نواكشوط، موريتانيا', 'Nouakchott, Mauritanie']
+    );
+    console.log(`Default store settings created (id: ${insertResult.rows[0].id})\n`);
   }
 
   console.log('--- Seed complete ---');
+  await shutdown();
   process.exit(0);
 }
 
-seed().catch((err) => {
+seed().catch(async (err) => {
   console.error('Seed script failed:', err);
+  await shutdown();
   process.exit(1);
 });

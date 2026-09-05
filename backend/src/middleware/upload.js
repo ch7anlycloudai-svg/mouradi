@@ -1,9 +1,8 @@
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const supabase = require('../config/supabase');
+const fs = require('fs');
 
-const BUCKET_NAME = 'images';
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 const ALLOWED_MIMETYPES = [
@@ -14,16 +13,50 @@ const ALLOWED_MIMETYPES = [
   'image/gif',
 ];
 
-/**
- * Multer storage: memory buffer (no disk writes).
- */
-const storage = multer.memoryStorage();
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+
+// Uploads directory at project root
+const UPLOADS_DIR = path.join(__dirname, '..', '..', '..', 'uploads');
 
 /**
- * File filter: only accept images.
+ * Ensure the uploads directory and subdirectories exist.
+ */
+const ensureDir = (dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+};
+
+// Create base upload dirs on startup
+ensureDir(path.join(UPLOADS_DIR, 'products'));
+ensureDir(path.join(UPLOADS_DIR, 'categories'));
+ensureDir(path.join(UPLOADS_DIR, 'banners'));
+ensureDir(path.join(UPLOADS_DIR, 'promos'));
+ensureDir(path.join(UPLOADS_DIR, 'settings'));
+
+/**
+ * Multer disk storage with unique filenames.
+ */
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Default folder; routes override via req._uploadFolder
+    const folder = req._uploadFolder || '';
+    const dest = folder ? path.join(UPLOADS_DIR, folder) : UPLOADS_DIR;
+    ensureDir(dest);
+    cb(null, dest);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
+/**
+ * File filter: only accept images with valid MIME types and extensions.
  */
 const fileFilter = (req, file, cb) => {
-  if (ALLOWED_MIMETYPES.includes(file.mimetype)) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ALLOWED_MIMETYPES.includes(file.mimetype) && ALLOWED_EXTENSIONS.includes(ext)) {
     cb(null, true);
   } else {
     cb(new Error('Only image files are allowed (jpeg, jpg, png, webp, gif).'), false);
@@ -40,55 +73,44 @@ const upload = multer({
 });
 
 /**
- * Upload a file buffer to Supabase Storage and return the public URL.
- *
- * @param {Object} file - Multer file object (buffer, originalname, mimetype)
- * @param {string} bucket - Supabase Storage bucket name
- * @param {string} folder - Folder path inside the bucket
- * @returns {Promise<string>} Public URL of the uploaded file
+ * Get the public URL path for an uploaded file.
+ * @param {Object} file - Multer file object (after disk storage)
+ * @returns {string} URL path like /uploads/products/abc.jpg
  */
-const uploadToSupabase = async (file, bucket = BUCKET_NAME, folder = '') => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const fileName = `${uuidv4()}${ext}`;
-  const filePath = folder ? `${folder}/${fileName}` : fileName;
-
-  const { error } = await supabase.storage
-    .from(bucket)
-    .upload(filePath, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false,
-    });
-
-  if (error) {
-    throw new Error(`Failed to upload file: ${error.message}`);
-  }
-
-  const { data: urlData } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(filePath);
-
-  return urlData.publicUrl;
+const getFileUrl = (file) => {
+  // Get the relative path from UPLOADS_DIR
+  const relativePath = path.relative(UPLOADS_DIR, file.path).replace(/\\/g, '/');
+  return `/uploads/${relativePath}`;
 };
 
 /**
- * Delete a file from Supabase Storage by its public URL.
- *
- * @param {string} publicUrl - The full public URL
- * @param {string} bucket - Supabase Storage bucket name
+ * Delete a file from the filesystem by its URL path.
+ * @param {string} fileUrl - URL path like /uploads/products/abc.jpg
  */
-const deleteFromSupabase = async (publicUrl, bucket = BUCKET_NAME) => {
-  if (!publicUrl) return;
+const deleteFile = (fileUrl) => {
+  if (!fileUrl || !fileUrl.startsWith('/uploads/')) return;
 
   try {
-    // Extract the file path from the public URL
-    const urlParts = publicUrl.split(`/storage/v1/object/public/${bucket}/`);
-    if (urlParts.length < 2) return;
+    const relativePath = fileUrl.replace('/uploads/', '');
+    // Prevent path traversal
+    const safePath = path.normalize(relativePath);
+    if (safePath.startsWith('..') || path.isAbsolute(safePath)) return;
 
-    const filePath = decodeURIComponent(urlParts[1]);
-    await supabase.storage.from(bucket).remove([filePath]);
+    const fullPath = path.join(UPLOADS_DIR, safePath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
   } catch (err) {
-    console.error('Error deleting file from storage:', err.message);
+    console.error('Error deleting file:', err.message);
   }
 };
 
-module.exports = { upload, uploadToSupabase, deleteFromSupabase, BUCKET_NAME };
+/**
+ * Middleware to set the upload folder for a route.
+ */
+const setUploadFolder = (folder) => (req, res, next) => {
+  req._uploadFolder = folder;
+  next();
+};
+
+module.exports = { upload, getFileUrl, deleteFile, setUploadFolder, UPLOADS_DIR };
