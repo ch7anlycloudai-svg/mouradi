@@ -10,7 +10,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "seed": "cd backend && node src/utils/seed.js",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node \"$(dirname \"$npm_package_json\")/scripts/postinstall.js\""
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
